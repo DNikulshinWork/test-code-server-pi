@@ -17,22 +17,26 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js (Latest)
+      - name: Setup Node.js (LTS v22 for stability)
         uses: actions/setup-node@v4
         with:
-          node-version: 'latest'
+          node-version: '22' # Стабильная LTS версия, убирает ошибки компиляции native-модулей
 
       - name: Install System & JS Packages (pnpm, nano, code-server)
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl git nano
+          sudo apt-get install -y curl git nano jq
           
-          # Установка pnpm с явным разрешением скриптов
+          # Установка pnpm и pi с явным разрешением скриптов
           npm install -g pnpm --allow-scripts
-          
-          # Стабильная установка code-server и pi напрямую через npm (избегаем сбоев curl на внешние домены)
-          npm install -g code-server --allow-scripts
           npm install -g @earendil-works/pi-coding-agent --allow-scripts
+          
+          # Стабильное скачивание и автономная установка последнего официального .deb релиза code-server напрямую с GitHub
+          CS_VERSION=$(curl -s https://github.com | jq -r .name)
+          echo "Installing code-server version: $CS_VERSION"
+          curl -fL "https://github.com{CS_VERSION}/code-server_${CS_VERSION//v/}_amd64.deb" -o code-server.deb
+          sudo dpkg -i code-server.deb
+          rm code-server.deb
           
           # Создание необходимых рабочих директорий
           mkdir -p "$WORKSPACE_DIR" .pi ~/.config/code-server
