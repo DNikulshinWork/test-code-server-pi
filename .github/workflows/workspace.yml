@@ -25,24 +25,26 @@ jobs:
 
       - name: Install System & JS Packages (pnpm, nano, code-server)
         run: |
+          # Настройка агрессивных повторов для apt-get при сбоях сети DNS
+          sudo echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries
           sudo apt-get update
           sudo apt-get install -y curl git nano
-          
-          # 1. СТАБИЛЬНАЯ УСТАНОВКА CODE-SERVER (Вынесена вверх, полностью независима от NPM реестра)
+
+          # 1. ОТКАЗОУСТОЙЧИВАЯ УСТАНОВКА CODE-SERVER (с повторными попытками при сбое DNS)
           echo "Installing code-server version: v$CS_VERSION"
-          curl -fL "https://github.com{CS_VERSION}/code-server_${CS_VERSION}_amd64.deb" -o code-server.deb
+          curl -fL --retry 5 --retry-delay 5 --retry-connrefused \
+            "https://github.com{CS_VERSION}/code-server_${CS_VERSION}_amd64.deb" -o code-server.deb
           sudo dpkg -i code-server.deb
           rm code-server.deb
 
           # 2. Установка pnpm
           npm install -g pnpm --allow-scripts
           
-          # 3. ИЗОЛИРОВАННАЯ УСТАНОВКА PI-AGENT (С защитой от 404 ошибок реестра)
+          # 3. Установка pi-agent с защитой от сбоев NPM реестра
           echo "Installing @earendil-works/pi-coding-agent..."
           npm install -g @earendil-works/pi-coding-agent --allow-scripts --prefer-online || {
-            echo "::warning::Прямая установка из реестра временно недоступна из-за сбоя NPM CDN. Переключаюсь на pnpm фолбек..."
-            pnpm root -g || true
-            pnpm install -g @earendil-works/pi-coding-agent --allow-scripts || echo "Пропускаем критическую блокировку pi-agent"
+            echo "::warning::Прямая установка из реестра временно недоступна. Переключаюсь на pnpm..."
+            pnpm install -g @earendil-works/pi-coding-agent --allow-scripts || echo "Пропускаем pi-agent"
           }
           
           # Создание необходимых рабочих директорий
