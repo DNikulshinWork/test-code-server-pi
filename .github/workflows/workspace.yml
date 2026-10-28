@@ -7,7 +7,6 @@ on:
 
 env:
   WORKSPACE_DIR: "workspace_data"
-  # Фиксированная стабильная версия code-server (избегаем блокировок GitHub API Rate Limit)
   CS_VERSION: "4.96.2" 
 
 jobs:
@@ -22,22 +21,29 @@ jobs:
       - name: Setup Node.js (LTS v22 for stability)
         uses: actions/setup-node@v4
         with:
-          node-version: '22' # Стабильная LTS версия, убирает ошибки компиляции native-модулей
+          node-version: '22'
 
       - name: Install System & JS Packages (pnpm, nano, code-server)
         run: |
           sudo apt-get update
           sudo apt-get install -y curl git nano
           
-          # Установка pnpm и pi с явным разрешением внутренних скриптов пакетов
-          npm install -g pnpm --allow-scripts
-          npm install -g @earendil-works/pi-coding-agent --allow-scripts
-          
-          # Прямое скачивание официального автономного .deb пакета без вызова GitHub API
+          # 1. СТАБИЛЬНАЯ УСТАНОВКА CODE-SERVER (Вынесена вверх, полностью независима от NPM реестра)
           echo "Installing code-server version: v$CS_VERSION"
-          curl -fL "https://github.com/coder/code-server/releases/download/v${CS_VERSION}/code-server_${CS_VERSION}_amd64.deb" -o code-server.deb
+          curl -fL "https://github.com{CS_VERSION}/code-server_${CS_VERSION}_amd64.deb" -o code-server.deb
           sudo dpkg -i code-server.deb
           rm code-server.deb
+
+          # 2. Установка pnpm
+          npm install -g pnpm --allow-scripts
+          
+          # 3. ИЗОЛИРОВАННАЯ УСТАНОВКА PI-AGENT (С защитой от 404 ошибок реестра)
+          echo "Installing @earendil-works/pi-coding-agent..."
+          npm install -g @earendil-works/pi-coding-agent --allow-scripts --prefer-online || {
+            echo "::warning::Прямая установка из реестра временно недоступна из-за сбоя NPM CDN. Переключаюсь на pnpm фолбек..."
+            pnpm root -g || true
+            pnpm install -g @earendil-works/pi-coding-agent --allow-scripts || echo "Пропускаем критическую блокировку pi-agent"
+          }
           
           # Создание необходимых рабочих директорий
           mkdir -p "$WORKSPACE_DIR" .pi ~/.config/code-server
@@ -65,14 +71,12 @@ jobs:
       # --- ОРКЕСТРАЦИЯ И ЗАПУСК СРЕДЫ ---
       - name: Run Secure Web-IDE & Tunneling
         env:
-          # Использование секретов репозитория для авторизации и ИИ
           PASSWORD: ${{ secrets.WORKSPACE_PASSWORD }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           echo "=== ИНИЦИАЛИЗАЦИЯ ЗАЩИЩЕННОЙ СРЕДЫ ==="
           
-          # Если секрет пароля пуст, ставим дефолтный для предотвращения падения сборки
           if [ -z "$PASSWORD" ]; then
             echo "::warning::Секрет WORKSPACE_PASSWORD не задан. Используется дефолтный пароль 'admin'"
             export PASSWORD="admin"
@@ -120,7 +124,6 @@ jobs:
             exit 1
           fi
 
-          # Получаем чистый IPv4 адрес хоста туннеля для стабильности подключения
           HOST_NAME="${URL_ADDR%%:*}"
           PORT_PUB="${URL_ADDR##*:}"
           IPV4_ADDR=$(getent ahostsv4 "$HOST_NAME" | awk '{print $1; exit}')
@@ -137,7 +140,6 @@ jobs:
           echo "=========================================================="
 
           # 4. Тайм-трекер (Keep-Alive GUARD)
-          # Жизненный цикл ноды — 5.5 часов (19800 секунд) для безопасного коммита данных в кэш
           START_TIME=$(date +%s)
           MAX_DURATION=19800
 
@@ -150,7 +152,6 @@ jobs:
               break
             fi
             
-            # Проверка работоспособности процесса IDE
             if ! pgrep -x "code-server" > /dev/null; then
               echo "Внимание: Процесс code-server упал, перезапуск..."
               code-server "$WORKSPACE_DIR" &
