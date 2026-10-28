@@ -24,30 +24,23 @@ jobs:
 
       - name: Install System & JS Packages (pnpm, nano, code-server)
         run: |
-          # Настройка повторов для apt-get при микросбоях сети
           echo 'Acquire::Retries "5";' | sudo tee /etc/apt/apt.conf.d/80-retries > /dev/null
-          
           sudo apt-get update
           sudo apt-get install -y curl git nano
 
-          # 1. ЧИСТАЯ УСТАНОВКА CODE-SERVER ЧЕРЕЗ NPM (С обходом бинарной компиляции argon2)
+          # 1. Установка code-server через npm
           echo "Установка code-server через npm..."
           sudo npm install -g code-server --unsafe-perm --allow-scripts
           
-          echo "Проверка установки:"
-          code-server --version
-
-          # 2. Установка pnpm
-          sudo npm install -g pnpm --allow-scripts
+          # 2. Установка pnpm и localtunnel для создания безопасного HTTPS туннеля
+          sudo npm install -g pnpm localtunnel --allow-scripts
           
-          # 3. Установка pi-agent с защитой от сбоев NPM реестра
+          # 3. Установка pi-agent
           echo "Installing @earendil-works/pi-coding-agent..."
           sudo npm install -g @earendil-works/pi-coding-agent --allow-scripts --prefer-online || {
-            echo "::warning::Прямая установка из реестра временно недоступна. Переключаюсь на pnpm..."
             sudo pnpm install -g @earendil-works/pi-coding-agent --allow-scripts || echo "Пропускаем pi-agent"
           }
           
-          # Создание необходимых рабочих директорий
           mkdir -p "$WORKSPACE_DIR" .pi ~/.config/code-server
 
       - name: Verify Docker & Docker Compose
@@ -95,49 +88,32 @@ jobs:
           # 2. Запуск VS Code (Code-Server) в фоне
           code-server "$WORKSPACE_DIR" &
           
-          # 3. Поднятие публичного туннеля через bore.pub с фолбеком на pinggy
-          start_bore() {
-            docker rm -f bore-workspace >/dev/null 2>&1 || true
-            docker run -d --name bore-workspace --network host ekzhang/bore local 8080 --to bore.pub >/dev/null
-            for i in $(seq 1 20); do
-              p=$(docker logs bore-workspace 2>&1 | grep -oE 'bore\.pub:[0-9]+' | head -1 || true)
-              if [ -n "$p" ]; then echo "$p"; return 0; fi
-              sleep 1
-            done
-            return 1
-          }
-
-          URL_ADDR=$(start_bore) || URL_ADDR=""
-
-          if [ -z "$URL_ADDR" ]; then
-            echo "bore недоступен, запускаем резервный туннель pinggy..."
-            nohup ssh -p 443 -o StrictHostKeyChecking=no -o ServerAliveInterval=30 \
-              -o ExitOnForwardFailure=yes -R0:localhost:8080 tcp@a.pinggy.io \
-              < /dev/null > "$HOME/pinggy.log" 2>&1 &
-            for i in $(seq 1 30); do
-              URL_ADDR=$(grep -oE '[a-z0-9.-]+\.pinggy\.link:[0-9]+' "$HOME/pinggy.log" | head -1 || true)
-              if [ -n "$URL_ADDR" ]; then break; fi
-              sleep 1
-            done
+          # 3. Поднятие публичного Безопасного HTTPS туннеля через localtunnel
+          echo "Запуск шифрованного HTTPS туннеля..."
+          nohup lt --port 8080 > localtunnel.log 2>&1 &
+          
+          # Даем туннелю 5 секунд на получение SSL-сертификата
+          sleep 5
+          
+          # Извлекаем чистую HTTPS ссылку из логов
+          HTTPS_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.loca\.lt' localtunnel.log | head -1 || true)
+          
+          if [ -z "$HTTPS_URL" ]; then
+            echo "::warning::Основной сервер localtunnel перегружен, запускаем альтернативный сервер..."
+            nohup lt --port 8080 --host https://localtunnel.me > localtunnel.log 2>&1 &
+            sleep 5
+            HTTPS_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.loca\.lt' localtunnel.log | head -1 || true)
           fi
 
-          if [ -z "$URL_ADDR" ]; then
-            echo "::error::Не удалось поднять ни один публичный туннель."
+          if [ -z "$HTTPS_URL" ]; then
+            echo "::error::Не удалось поднять безопасный HTTPS туннель."
+            cat localtunnel.log
             exit 1
           fi
 
-          HOST_NAME="${URL_ADDR%%:*}"
-          PORT_PUB="${URL_ADDR##*:}"
-          IPV4_ADDR=$(getent ahostsv4 "$HOST_NAME" | awk '{print $1; exit}')
-          [ -z "$IPV4_ADDR" ] && IPV4_ADDR="$HOST_NAME"
-
           echo "=========================================================="
           echo "ВХОД В ВАШ ОБЛАЧНЫЙ ВОРКСПЕЙС (Firebase Studio / IDX):"
-          if [[ "$URL_ADDR" == *"pinggy"* ]]; then
-            echo "    Ссылка: http://${URL_ADDR}"
-          else
-            echo "    Ссылка: http://${IPV4_ADDR}:${PORT_PUB}"
-          fi
+          echo "    Защищенная ссылка (HTTPS): ${HTTPS_URL}"
           echo "    Пароль для входа: сохранен в вашем WORKSPACE_PASSWORD"
           echo "=========================================================="
 
