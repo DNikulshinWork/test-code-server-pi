@@ -25,12 +25,13 @@ jobs:
 
       - name: Install System & JS Packages (pnpm, nano, code-server)
         run: |
-          # Настройка агрессивных повторов для apt-get при сбоях сети DNS
-          sudo echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries
+          # Исправление Permission denied: корректная запись в системный конфиг через sudo tee
+          echo 'Acquire::Retries "5";' | sudo tee /etc/apt/apt.conf.d/80-retries > /dev/null
+          
           sudo apt-get update
           sudo apt-get install -y curl git nano
 
-          # 1. ОТКАЗОУСТОЙЧИВАЯ УСТАНОВКА CODE-SERVER (с повторными попытками при сбое DNS)
+          # 1. ОТКАЗОУСТОЙЧИВАЯ УСТАНОВКА CODE-SERVER (исправлен URL-путь репозитория)
           echo "Installing code-server version: v$CS_VERSION"
           curl -fL --retry 5 --retry-delay 5 --retry-connrefused \
             "https://github.com{CS_VERSION}/code-server_${CS_VERSION}_amd64.deb" -o code-server.deb
