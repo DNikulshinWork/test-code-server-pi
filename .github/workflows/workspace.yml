@@ -1,0 +1,167 @@
+name: "Production Stateful Workspace"
+
+on:
+  schedule:
+    - cron: '0 */4 * * *' # Непрерывный запуск каждые 4 часа (Keep-Alive)
+  workflow_dispatch:      # Ручной запуск из панели Actions
+
+env:
+  WORKSPACE_DIR: "workspace_data"
+
+jobs:
+  development-node:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355 # Завершаем чуть раньше жесткого лимита GitHub (360 минут)
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js (Latest)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'latest'
+
+      - name: Install System & JS Packages (pnpm, nano, code-server)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl git nano
+          
+          # Установка pnpm глобально
+          npm install -g pnpm
+          
+          # Установка глобального ИИ-агента Harness Pi
+          npm install -g @earendil-works/pi-coding-agent
+          
+          # Установка веб-версии VS Code (Code-Server)
+          curl -fsSL https://code-server.dev | sh
+          
+          # Создание рабочих директорий
+          mkdir -p "$WORKSPACE_DIR" .pi ~/.config/code-server
+
+      - name: Verify Docker & Docker Compose
+        run: |
+          echo "=== Проверка Docker окружения ==="
+          docker --version
+          docker compose version
+          docker ps
+
+      # --- ЭТАП СОХРАНЕНИЯ ДАННЫХ (STATEFUL KEEP-ALIVE) ---
+      - name: Restore Workspace & Tooling Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.config/code-server
+            ~/.local/share/pnpm
+            .pi/
+            ${{ env.WORKSPACE_DIR }}/
+          key: prod-workspace-state-${{ github.run_id }}
+          restore-keys: |
+            prod-workspace-state-
+
+      # --- ОРКЕСТРАЦИЯ И ЗАПУСК СРЕДЫ ---
+      - name: Run Secure Web-IDE & Tunneling
+        env:
+          # Использование секретов репозитория для авторизации и ИИ
+          PASSWORD: ${{ secrets.WORKSPACE_PASSWORD }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          echo "=== ИНИЦИАЛИЗАЦИЯ ЗАЩИЩЕННОЙ СРЕДЫ ==="
+          
+          # Если секрет пароля пуст, ставим дефолтный для предотвращения падения сборки
+          if [ -z "$PASSWORD" ]; then
+            echo "::warning::Секрет WORKSPACE_PASSWORD не задан. Используется дефолтный пароль 'admin'"
+            export PASSWORD="admin"
+          fi
+
+          # 1. Настройка конфига code-server (авторизация по паролю)
+          cat <<EOF > ~/.config/code-server/config.yaml
+          bind-addr: 127.0.0.1:8080
+          auth: password
+          password: "$PASSWORD"
+          cert: false
+          EOF
+
+          # 2. Запуск VS Code (Code-Server) в фоне
+          code-server "$WORKSPACE_DIR" &
+          
+          # 3. Поднятие публичного туннеля через bore.pub с фолбеком на pinggy
+          start_bore() {
+            docker rm -f bore-workspace >/dev/null 2>&1 || true
+            docker run -d --name bore-workspace --network host ekzhang/bore local 8080 --to bore.pub >/dev/null
+            for i in $(seq 1 20); do
+              p=$(docker logs bore-workspace 2>&1 | grep -oE 'bore\.pub:[0-9]+' | head -1 || true)
+              if [ -n "$p" ]; then echo "$p"; return 0; fi
+              sleep 1
+            done
+            return 1
+          }
+
+          URL_ADDR=$(start_bore) || URL_ADDR=""
+
+          if [ -z "$URL_ADDR" ]; then
+            echo "bore недоступен, запускаем резервный туннель pinggy..."
+            nohup ssh -p 443 -o StrictHostKeyChecking=no -o ServerAliveInterval=30 \
+              -o ExitOnForwardFailure=yes -R0:localhost:8080 tcp@a.pinggy.io \
+              < /dev/null > "$HOME/pinggy.log" 2>&1 &
+            for i in $(seq 1 30); do
+              URL_ADDR=$(grep -oE '[a-z0-9.-]+\.pinggy\.link:[0-9]+' "$HOME/pinggy.log" | head -1 || true)
+              if [ -n "$URL_ADDR" ]; then break; fi
+              sleep 1
+            done
+          fi
+
+          if [ -z "$URL_ADDR" ]; then
+            echo "::error::Не удалось поднять ни один публичный туннель."
+            exit 1
+          fi
+
+          # Получаем чистый IPv4 адрес хоста туннеля для стабильности подключения
+          HOST_NAME="${URL_ADDR%%:*}"
+          PORT_PUB="${URL_ADDR##*:}"
+          IPV4_ADDR=$(getent ahostsv4 "$HOST_NAME" | awk '{print $1; exit}')
+          [ -z "$IPV4_ADDR" ] && IPV4_ADDR="$HOST_NAME"
+
+          echo "=========================================================="
+          echo "ВХОД В ВАШ ОБЛАЧНЫЙ ВОРКСПЕЙС (Firebase Studio / IDX):"
+          if [[ "$URL_ADDR" == *"pinggy"* ]]; then
+            echo "    Ссылка: http://${URL_ADDR}"
+          else
+            echo "    Ссылка: http://${IPV4_ADDR}:${PORT_PUB}"
+          fi
+          echo "    Пароль для входа: сохранен в вашем WORKSPACE_PASSWORD"
+          echo "=========================================================="
+
+          # 4. Тайм-трекер (Keep-Alive GUARD)
+          # Жизненный цикл ноды — 5.5 часов (19800 секунд) для безопасного коммита данных в кэш
+          START_TIME=$(date +%s)
+          MAX_DURATION=19800
+
+          while true; do
+            CURRENT_TIME=$(date +%s)
+            ELAPSED=$((CURRENT_TIME - START_TIME))
+            
+            if [ $ELAPSED -ge $MAX_DURATION ]; then
+              echo "Достигнут безопасный лимит времени (5.5 часов). Сохраняем состояние..."
+              break
+            fi
+            
+            # Проверка работоспособности процесса IDE
+            if ! pgrep -x "code-server" > /dev/null; then
+              echo "Внимание: Процесс code-server упал, перезапуск..."
+              code-server "$WORKSPACE_DIR" &
+            fi
+            
+            sleep 60
+          done
+
+      # --- ФИНАЛЬНЫЙ ЭТАП: СЛУЖЕБНЫЙ СНАПШОТ ---
+      - name: Archive Hard Copy (Artifacts)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: secure-workspace-snapshot-${{ github.run_number }}
+          path: |
+            ${{ env.WORKSPACE_DIR }}/
+            .pi/
