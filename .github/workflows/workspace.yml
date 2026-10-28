@@ -7,6 +7,8 @@ on:
 
 env:
   WORKSPACE_DIR: "workspace_data"
+  # Фиксированная стабильная версия code-server (избегаем блокировок GitHub API Rate Limit)
+  CS_VERSION: "4.96.2" 
 
 jobs:
   development-node:
@@ -25,16 +27,15 @@ jobs:
       - name: Install System & JS Packages (pnpm, nano, code-server)
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl git nano jq
+          sudo apt-get install -y curl git nano
           
-          # Установка pnpm и pi с явным разрешением скриптов
+          # Установка pnpm и pi с явным разрешением внутренних скриптов пакетов
           npm install -g pnpm --allow-scripts
           npm install -g @earendil-works/pi-coding-agent --allow-scripts
           
-          # Стабильное скачивание и автономная установка последнего официального .deb релиза code-server напрямую с GitHub
-          CS_VERSION=$(curl -s https://github.com | jq -r .name)
-          echo "Installing code-server version: $CS_VERSION"
-          curl -fL "https://github.com{CS_VERSION}/code-server_${CS_VERSION//v/}_amd64.deb" -o code-server.deb
+          # Прямое скачивание официального автономного .deb пакета без вызова GitHub API
+          echo "Installing code-server version: v$CS_VERSION"
+          curl -fL "https://github.com/coder/code-server/releases/download/v${CS_VERSION}/code-server_${CS_VERSION}_amd64.deb" -o code-server.deb
           sudo dpkg -i code-server.deb
           rm code-server.deb
           
