@@ -30,12 +30,25 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y curl git nano
 
-          # 1. СТАБИЛЬНЫЙ И БЕЗОПАСНЫЙ КАНАЛ: Установка code-server через официальный APT-репозиторий
-          echo "Добавление официального репозитория code-server..."
-          curl -fsSL https://code-server.dev | sudo bash
+          # 1. АВТОНОМНАЯ УСТАНОВКА CODE-SERVER ИЗ СТАТИЧЕСКОГО ТАРБОЛЛА (Изолировано от code-server.dev)
+          echo "Скачивание стабильного релиза code-server v4.96.2..."
+          curl -fL --retry 5 --retry-delay 5 --retry-connrefused \
+            "https://github.com" -o code-server.tar.gz
           
-          echo "Установка code-server через системный менеджер пакетов..."
-          sudo apt-get install -y code-server
+          echo "Распаковка и интеграция в систему..."
+          tar -xzf code-server.tar.gz
+          sudo cp -r code-server-4.96.2-linux-amd64/bin/* /usr/local/bin/
+          sudo mkdir -p /usr/local/lib/code-server-4.96.2
+          sudo cp -r code-server-4.96.2-linux-amd64/* /usr/local/lib/code-server-4.96.2/
+          
+          # Создание символической ссылки для глобального вызова
+          sudo ln -sf /usr/local/lib/code-server-4.96.2/bin/code-server /usr/local/bin/code-server
+          
+          # Очистка временных файлов
+          rm -rf code-server.tar.gz code-server-4.96.2-linux-amd64
+          
+          echo "Проверка установки:"
+          code-server --version
 
           # 2. Установка pnpm
           npm install -g pnpm --allow-scripts
