@@ -30,10 +30,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y curl git nano
 
-          # 1. АВТОНОМНАЯ УСТАНОВКА CODE-SERVER ИЗ СТАТИЧЕСКОГО ТАРБОЛЛА (Изолировано от code-server.dev)
+          # 1. АВТОНОМНАЯ УСТАНОВКА CODE-SERVER ИЗ ИСПРАВЛЕННОЙ СТАТИЧЕСКОЙ ССЫЛКИ
           echo "Скачивание стабильного релиза code-server v4.96.2..."
-          curl -fL --retry 5 --retry-delay 5 --retry-connrefused \
-            "https://github.com" -o code-server.tar.gz
+          curl -fL --retry 5 --retry-delay 5 --retry-connrefused "https://github.com" -o code-server.tar.gz
           
           echo "Распаковка и интеграция в систему..."
           tar -xzf code-server.tar.gz
