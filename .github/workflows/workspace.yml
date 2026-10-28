@@ -30,33 +30,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y curl git nano
 
-          # 1. АВТОНОМНАЯ УСТАНОВКА CODE-SERVER ИЗ ИСПРАВЛЕННОЙ СТАТИЧЕСКОЙ ССЫЛКИ
-          echo "Скачивание стабильного релиза code-server v4.96.2..."
-          curl -fL --retry 5 --retry-delay 5 --retry-connrefused "https://github.com" -o code-server.tar.gz
-          
-          echo "Распаковка и интеграция в систему..."
-          tar -xzf code-server.tar.gz
-          sudo cp -r code-server-4.96.2-linux-amd64/bin/* /usr/local/bin/
-          sudo mkdir -p /usr/local/lib/code-server-4.96.2
-          sudo cp -r code-server-4.96.2-linux-amd64/* /usr/local/lib/code-server-4.96.2/
-          
-          # Создание символической ссылки для глобального вызова
-          sudo ln -sf /usr/local/lib/code-server-4.96.2/bin/code-server /usr/local/bin/code-server
-          
-          # Очистка временных файлов
-          rm -rf code-server.tar.gz code-server-4.96.2-linux-amd64
+          # 1. ЧИСТАЯ УСТАНОВКА CODE-SERVER ЧЕРЕЗ NPM (С обходом бинарной компиляции argon2)
+          echo "Установка code-server через npm..."
+          sudo npm install -g code-server --unsafe-perm --allow-scripts
           
           echo "Проверка установки:"
           code-server --version
 
           # 2. Установка pnpm
-          npm install -g pnpm --allow-scripts
+          sudo npm install -g pnpm --allow-scripts
           
           # 3. Установка pi-agent с защитой от сбоев NPM реестра
           echo "Installing @earendil-works/pi-coding-agent..."
-          npm install -g @earendil-works/pi-coding-agent --allow-scripts --prefer-online || {
+          sudo npm install -g @earendil-works/pi-coding-agent --allow-scripts --prefer-online || {
             echo "::warning::Прямая установка из реестра временно недоступна. Переключаюсь на pnpm..."
-            pnpm install -g @earendil-works/pi-coding-agent --allow-scripts || echo "Пропускаем pi-agent"
+            sudo pnpm install -g @earendil-works/pi-coding-agent --allow-scripts || echo "Пропускаем pi-agent"
           }
           
           # Создание необходимых рабочих директорий
