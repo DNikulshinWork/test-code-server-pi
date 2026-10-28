@@ -27,16 +27,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y curl git nano
           
-          # Установка pnpm глобально
-          npm install -g pnpm
+          # Установка pnpm и pi с явным разрешением запуска скриптов установки пакетов
+          npm install -g pnpm --allow-scripts
+          npm install -g @earendil-works/pi-coding-agent --allow-scripts
           
-          # Установка глобального ИИ-агента Harness Pi
-          npm install -g @earendil-works/pi-coding-agent
+          # Безопасное скачивание установщика во временный файл (исправление ошибки sh: 8: Syntax error)
+          curl -fsSL https://code-server.dev -o install_vscode.sh
+          chmod +x install_vscode.sh
+          ./install_vscode.sh
+          rm install_vscode.sh
           
-          # Установка веб-версии VS Code (Code-Server)
-          curl -fsSL https://code-server.dev | sh
-          
-          # Создание рабочих директорий
+          # Создание необходимых рабочих директорий
           mkdir -p "$WORKSPACE_DIR" .pi ~/.config/code-server
 
       - name: Verify Docker & Docker Compose
